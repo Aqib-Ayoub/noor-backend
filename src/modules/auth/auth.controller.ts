@@ -22,8 +22,13 @@ export const sendOtp = async (req: Request, res: Response): Promise<void> => {
   }
 
   const { phone } = parse.data;
-  await otpService.sendOtp(phone);
-  sendSuccess(res, null, 'OTP sent successfully. Check server console for mock OTP.');
+  const code = await otpService.sendOtp(phone);
+
+  // In development: include the OTP in the response so the app can display it.
+  // Remove this in production when a real SMS gateway (Twilio) is wired up.
+  const devOtp = process.env.NODE_ENV !== 'production' ? code : undefined;
+
+  sendSuccess(res, { devOtp }, 'OTP sent successfully.');
 };
 
 /**

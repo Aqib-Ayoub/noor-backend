@@ -36,6 +36,8 @@ export interface IMasjid extends Document {
   imamName?:         string;
   imamSalary:        number;
   savings:           number;
+  /** Per-person monthly fee — same for all masjid members. Fee = perPersonFee × family membersCount */
+  perPersonFee:      number;
   prayerOverrides:   PrayerOverrides;
   customPrayerTimes: Partial<Record<'Fajr' | 'Dhuhr' | 'Asr' | 'Maghrib' | 'Isha', string>>;
   approvedStatus:    MasjidStatus;
@@ -74,9 +76,11 @@ const MasjidSchema = new Schema<IMasjid>(
       ref: 'User',
     }],
 
-    imamName:   { type: String, trim: true, default: null },
-    imamSalary: { type: Number, default: 0, min: 0 },
-    savings:    { type: Number, default: 0, min: 0 },
+    imamName:      { type: String, trim: true, default: null },
+    imamSalary:    { type: Number, default: 0, min: 0 },
+    savings:       { type: Number, default: 0, min: 0 },
+    /** Per-person monthly fee shared across all families in this masjid */
+    perPersonFee:  { type: Number, default: 0, min: 0 },
 
     prayerOverrides: {
       type: Schema.Types.Mixed,

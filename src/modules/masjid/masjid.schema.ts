@@ -36,6 +36,7 @@ export const UpdateMasjidSettingsSchema = z.object({
   imamSalary:    z.number().min(0).optional(),
   accountNumber: z.string().trim().optional(),
   phone:         z.string().trim().regex(/^\d{10}$/).optional(),
+  perPersonFee:  z.number().min(0).optional(),
 });
 
 // ─── Savings (separate — has change-request logic) ────────────────────────────
@@ -57,7 +58,7 @@ export const AddFamilyByAdminSchema = z.object({
   familyHeadPhone: z.string().trim().regex(/^[6-9]\d{9}$/, 'Valid 10-digit phone required'),
   familyHeadName:  z.string().trim().min(2, 'Name is required'),
   membersCount:    z.number().int().min(1),
-  payPerPerson:    z.number().min(0),
+  // payPerPerson removed — fee is now set at masjid level (perPersonFee in Masjid settings)
 });
 
 // ─── Co-Admin Management ──────────────────────────────────────────────────────

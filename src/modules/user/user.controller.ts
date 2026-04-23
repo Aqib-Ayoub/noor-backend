@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import User from '../../models/User';
 import Masjid from '../../models/Masjid';
 import Family from '../../models/Family';
+import Payment from '../../models/Payment';
 import JoinRequest from '../../models/JoinRequest';
 import { sendSuccess, sendError } from '../../utils/response';
 
@@ -62,14 +63,33 @@ export const getMasjidContext = async (req: Request, res: Response): Promise<voi
   const adminRef = masjid.adminRef as any;
 
   // ── Calculate monthly dues for regular users ──
-  let myDues: { membersCount: number; payPerPerson: number; totalMonthly: number } | null = null;
+  let myDues: {
+    membersCount: number;
+    payPerPerson: number;
+    totalMonthly: number;
+    isPaid:       boolean;
+  } | null = null;
+
   if (user.role !== 'MasjidAdmin') {
     const family = await Family.findOne({ familyHead: user._id, masjidRef: masjid._id });
     if (family) {
+      // Always use the masjid-level perPersonFee (override stored per-family fee)
+      const fee          = masjid.perPersonFee > 0 ? masjid.perPersonFee : family.payPerPerson;
+      const totalMonthly = family.membersCount * fee;
+
+      // Check if this month has been paid
+      const now = new Date();
+      const paymentRecord = await Payment.findOne({
+        familyRef: family._id,
+        month:     now.getMonth() + 1,   // 1–12
+        year:      now.getFullYear(),
+      });
+
       myDues = {
         membersCount:  family.membersCount,
-        payPerPerson:  family.payPerPerson,
-        totalMonthly:  family.membersCount * family.payPerPerson,
+        payPerPerson:  fee,
+        totalMonthly,
+        isPaid:        !!paymentRecord,
       };
     }
   }
@@ -93,6 +113,7 @@ export const getMasjidContext = async (req: Request, res: Response): Promise<voi
         savingsLocked:     masjid.savings > 0,
         imamName:          masjid.imamName,
         imamSalary:        masjid.imamSalary,
+        perPersonFee:      masjid.perPersonFee ?? 0,
         prayerOverrides:   masjid.prayerOverrides,
         customPrayerTimes: masjid.customPrayerTimes ?? {},
         hadithOfTheDay:    masjid.hadithOfTheDay,

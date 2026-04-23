@@ -157,11 +157,12 @@ export const updateMasjidSettings = async (req: Request, res: Response): Promise
   if (!masjid) { sendError(res, 'Masjid not found', 404); return; }
   if (!isAdminOf(masjid, req.user!._id.toString())) { sendError(res, 'Forbidden', 403); return; }
 
-  const { imamName, imamSalary, accountNumber, phone } = parse.data;
+  const { imamName, imamSalary, accountNumber, phone, perPersonFee } = parse.data;
   if (imamName      !== undefined) masjid.imamName      = imamName;
   if (imamSalary    !== undefined) masjid.imamSalary    = imamSalary;
   if (accountNumber !== undefined) masjid.accountNumber = accountNumber;
   if (phone         !== undefined) masjid.phone         = phone;
+  if (perPersonFee  !== undefined) masjid.perPersonFee  = perPersonFee;
   await masjid.save();
 
   sendSuccess(res, masjid, 'Masjid settings updated');
@@ -300,7 +301,7 @@ export const addFamilyByAdmin = async (req: Request, res: Response): Promise<voi
   if (!masjid) { sendError(res, 'Masjid not found', 404); return; }
   if (!isAdminOf(masjid, req.user!._id.toString())) { sendError(res, 'Forbidden', 403); return; }
 
-  const { familyHeadPhone, familyHeadName, membersCount, payPerPerson } = parse.data;
+  const { familyHeadPhone, familyHeadName, membersCount } = parse.data;
 
   // Find or pre-create the user
   let familyHead = await User.findOne({ phone: familyHeadPhone });
@@ -328,11 +329,14 @@ export const addFamilyByAdmin = async (req: Request, res: Response): Promise<voi
   // Link user to masjid
   await User.findByIdAndUpdate(familyHead._id, { masjidRef: masjid._id });
 
+  // Use masjid-level perPersonFee — fee is uniform for all families
+  const fee = masjid.perPersonFee ?? 0;
+
   const family = await Family.create({
     familyHead:   familyHead._id,
     masjidRef:    masjid._id,
     membersCount,
-    payPerPerson,
+    payPerPerson: fee,
   });
 
   const populated = await family.populate('familyHead', 'name phone');
@@ -352,8 +356,10 @@ export const listFamilies = async (req: Request, res: Response): Promise<void> =
     .populate('familyHead', 'name phone')
     .sort({ createdAt: -1 });
 
-  const totalMonthly = families.reduce((sum, f) => sum + f.membersCount * f.payPerPerson, 0);
-  sendSuccess(res, { families, totalMonthly }, 'Families fetched');
+  // Use masjid-level perPersonFee for total calculation
+  const fee = masjid.perPersonFee ?? 0;
+  const totalMonthly = families.reduce((sum, f) => sum + f.membersCount * fee, 0);
+  sendSuccess(res, { families, totalMonthly, perPersonFee: fee }, 'Families fetched');
 };
 
 /**
