@@ -21,8 +21,22 @@ const MONGO_URI = process.env.MONGO_URI ?? 'mongodb://localhost:27017/noor';
 
 /** ---------- Global Middleware ---------- */
 
-/** Enable CORS for all origins (tighten in production) */
-app.use(cors());
+/** Enable CORS — restrict to aqooi.in and localhost in dev */
+const allowedOrigins = [
+  'https://aqooi.in',
+  'https://noor-backend.aqooi.in',
+  'http://localhost:3000',   // admin dashboard dev
+  'http://localhost:5173',   // vite dev
+];
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow requests with no origin (mobile apps, Postman)
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.some(o => origin.startsWith(o))) return cb(null, true);
+    cb(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+}));
 
 /** Parse incoming JSON request bodies */
 app.use(express.json());
