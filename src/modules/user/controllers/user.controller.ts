@@ -58,15 +58,13 @@ export const getMasjidContext = async (req: Request, res: Response): Promise<voi
   // ── Calculate monthly dues for regular users ──
   let myDues: { membersCount: number; payPerPerson: number; totalMonthly: number; isPaid: boolean } | null = null;
 
-  if (user.role !== 'MasjidAdmin') {
-    const family = await Family.findOne({ familyHead: user._id, masjidRef: masjid._id });
-    if (family) {
-      const fee          = masjid.perPersonFee > 0 ? masjid.perPersonFee : family.payPerPerson;
-      const totalMonthly = family.membersCount * fee;
-      const now = new Date();
-      const paymentRecord = await Payment.findOne({ familyRef: family._id, month: now.getMonth() + 1, year: now.getFullYear() });
-      myDues = { membersCount: family.membersCount, payPerPerson: fee, totalMonthly, isPaid: !!paymentRecord };
-    }
+  const family = await Family.findOne({ familyHead: user._id, masjidRef: masjid._id });
+  if (family) {
+    const fee          = masjid.perPersonFee > 0 ? masjid.perPersonFee : family.payPerPerson;
+    const totalMonthly = family.membersCount * fee;
+    const now = new Date();
+    const paymentRecord = await Payment.findOne({ familyRef: family._id, month: now.getMonth() + 1, year: now.getFullYear() });
+    myDues = { membersCount: family.membersCount, payPerPerson: fee, totalMonthly, isPaid: !!paymentRecord };
   }
 
   sendSuccess(res, {
@@ -94,4 +92,18 @@ export const getMasjidContext = async (req: Request, res: Response): Promise<voi
       adminPhone:         adminRef?.phone ?? null,
     },
   }, 'Masjid context fetched successfully');
+};
+
+/**
+ * GET /api/user/payment-history
+ * Returns the history of cash payments made by this user (family head).
+ */
+export const getPaymentHistory = async (req: Request, res: Response): Promise<void> => {
+  const user = req.user!;
+  
+  const payments = await Payment.find({ userRef: user._id })
+    .populate('masjidRef', 'name')
+    .sort({ year: -1, month: -1, createdAt: -1 });
+
+  sendSuccess(res, payments, 'Payment history fetched successfully');
 };

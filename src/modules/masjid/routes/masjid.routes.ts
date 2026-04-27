@@ -18,6 +18,9 @@ import {
   addFamilyByAdmin,
   listFamilies,
   removeFamily,
+  updateFamily,
+  recordCashPayment,
+  getFamilyPaymentHistory,
   getLeaderboard,
 } from '../controllers/masjid.controller';
 import { authenticate } from '../../../middlewares/auth.middleware';
@@ -52,7 +55,10 @@ masjidRouter.delete('/:id/co-admins/:userId', authenticate, requireRole(UserRole
 // ── Family Management (Admin-direct) ─────────────────────────────────────────
 masjidRouter.post('/:id/families',             authenticate, requireRole(UserRole.MasjidAdmin), requireApprovedMasjid, addFamilyByAdmin);
 masjidRouter.get('/:id/families',              authenticate, requireRole(UserRole.MasjidAdmin), listFamilies);
+masjidRouter.patch('/:id/families/:familyId',  authenticate, requireRole(UserRole.MasjidAdmin), requireApprovedMasjid, updateFamily);
 masjidRouter.delete('/:id/families/:familyId', authenticate, requireRole(UserRole.MasjidAdmin), removeFamily);
+masjidRouter.post('/:id/families/:familyId/pay', authenticate, requireRole(UserRole.MasjidAdmin), requireApprovedMasjid, recordCashPayment);
+masjidRouter.get('/:id/families/:familyId/payments', authenticate, requireRole(UserRole.MasjidAdmin), getFamilyPaymentHistory);
 
 // ── Join Requests (User-initiated) ────────────────────────────────────────────
 masjidRouter.post('/:id/join-request',          authenticate, submitJoinRequest);

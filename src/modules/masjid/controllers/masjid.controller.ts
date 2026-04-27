@@ -4,6 +4,7 @@ import Masjid from '../../../models/Masjid';
 import User, { UserRole } from '../../../models/User';
 import Family from '../../../models/Family';
 import JoinRequest, { JoinRequestStatus } from '../../../models/JoinRequest';
+import Payment from '../../../models/Payment';
 import ChangeRequest from '../../../models/ChangeRequest';
 import { PrayerService } from '../../../services/prayer.service';
 import {
@@ -207,7 +208,64 @@ export const listFamilies = async (req: Request, res: Response): Promise<void> =
   const families = await Family.find({ masjidRef: req.params.id }).populate('familyHead', 'name phone').sort({ createdAt: -1 });
   const fee = masjid.perPersonFee ?? 0;
   const totalMonthly = families.reduce((sum, f) => sum + f.membersCount * fee, 0);
-  sendSuccess(res, { families, totalMonthly, perPersonFee: fee }, 'Families fetched');
+
+  // Enrich each family with current-month payment status
+  const now = new Date();
+  const curMonth = now.getMonth() + 1;
+  const curYear  = now.getFullYear();
+  const familyIds = families.map(f => f._id);
+  const paidThisMonth = await Payment.find({ familyRef: { $in: familyIds }, month: curMonth, year: curYear });
+  const paidSet = new Set(paidThisMonth.map(p => p.familyRef.toString()));
+
+  const enriched = families.map(f => ({
+    ...(f as any).toObject(),
+    isPaidThisMonth: paidSet.has(f._id.toString()),
+  }));
+
+  const unpaidOnly = req.query.unpaidOnly === 'true';
+  const result = unpaidOnly ? enriched.filter(f => !f.isPaidThisMonth) : enriched;
+
+  sendSuccess(res, { families: result, totalMonthly, perPersonFee: fee }, 'Families fetched');
+};
+
+export const getFamilyPaymentHistory = async (req: Request, res: Response): Promise<void> => {
+  const masjid = await Masjid.findById(req.params.id);
+  if (!masjid) { sendError(res, 'Masjid not found', 404); return; }
+  if (!isAdminOf(masjid, req.user!._id.toString())) { sendError(res, 'Forbidden', 403); return; }
+
+  const family = await Family.findById(req.params.familyId).populate('familyHead', 'name phone');
+  if (!family) { sendError(res, 'Family not found', 404); return; }
+
+  const payments = await Payment.find({ familyRef: family._id }).sort({ year: -1, month: -1 });
+
+  // Build set of paid month/year combos
+  const paidSet = new Set(payments.map(p => `${p.year}-${p.month}`));
+
+  const fee = masjid.perPersonFee > 0 ? masjid.perPersonFee : family.payPerPerson;
+  const monthlyAmount = family.membersCount * fee;
+
+  // Calculate pending months: from family creation month up to current month
+  const now    = new Date();
+  const start  = new Date(family.createdAt);
+  const pending: { month: number; year: number; amount: number }[] = [];
+
+  let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  const endCursor = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  while (cursor <= endCursor) {
+    const m = cursor.getMonth() + 1;
+    const y = cursor.getFullYear();
+    if (!paidSet.has(`${y}-${m}`)) {
+      pending.push({ month: m, year: y, amount: monthlyAmount });
+    }
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+  }
+
+  sendSuccess(res, {
+    family: { ...(family as any).toObject(), monthlyAmount },
+    payments,
+    pendingMonths: pending,
+  }, 'Family payment history fetched');
 };
 
 export const removeFamily = async (req: Request, res: Response): Promise<void> => {
@@ -216,6 +274,73 @@ export const removeFamily = async (req: Request, res: Response): Promise<void> =
   if (!isAdminOf(masjid, req.user!._id.toString())) { sendError(res, 'Forbidden', 403); return; }
   await Family.findByIdAndDelete(req.params.familyId);
   sendSuccess(res, null, 'Family removed');
+};
+
+export const updateFamily = async (req: Request, res: Response): Promise<void> => {
+  const masjid = await Masjid.findById(req.params.id);
+  if (!masjid) { sendError(res, 'Masjid not found', 404); return; }
+  if (!isAdminOf(masjid, req.user!._id.toString())) { sendError(res, 'Forbidden', 403); return; }
+
+  const family = await Family.findById(req.params.familyId).populate('familyHead', 'name phone');
+  if (!family) { sendError(res, 'Family not found', 404); return; }
+
+  const { familyHeadName, familyHeadPhone, membersCount } = req.body as {
+    familyHeadName?: string;
+    familyHeadPhone?: string;
+    membersCount?: number;
+  };
+
+  // Update the linked User's name/phone if provided
+  if (familyHeadName || familyHeadPhone) {
+    const updateFields: Record<string, string> = {};
+    if (familyHeadName)  updateFields.name  = familyHeadName;
+    if (familyHeadPhone) updateFields.phone = familyHeadPhone;
+    await User.findByIdAndUpdate(family.familyHead, updateFields);
+  }
+
+  if (typeof membersCount === 'number' && membersCount > 0) {
+    family.membersCount = membersCount;
+    await family.save();
+  }
+
+  const updated = await Family.findById(family._id).populate('familyHead', 'name phone');
+  sendSuccess(res, updated, 'Family updated successfully');
+};
+
+export const recordCashPayment = async (req: Request, res: Response): Promise<void> => {
+  const masjid = await Masjid.findById(req.params.id);
+  if (!masjid) { sendError(res, 'Masjid not found', 404); return; }
+  if (!isAdminOf(masjid, req.user!._id.toString())) { sendError(res, 'Forbidden', 403); return; }
+
+  const family = await Family.findById(req.params.familyId);
+  if (!family) { sendError(res, 'Family not found', 404); return; }
+
+  const now = new Date();
+  const month = Number(req.body.month) || now.getMonth() + 1;
+  const year = Number(req.body.year) || now.getFullYear();
+  const fee = masjid.perPersonFee > 0 ? masjid.perPersonFee : family.payPerPerson;
+  const computedAmount = family.membersCount * fee;
+  const amount = Number(req.body.amount) || computedAmount;
+
+  const existingPayment = await Payment.findOne({ familyRef: family._id, month, year });
+  if (existingPayment) {
+    sendError(res, `Payment for ${month}/${year} is already recorded`, 400); 
+    return;
+  }
+
+  const payment = await Payment.create({
+    familyRef: family._id,
+    masjidRef: masjid._id,
+    userRef: family.familyHead,
+    month,
+    year,
+    amount,
+  });
+
+  masjid.savings += amount;
+  await masjid.save();
+
+  sendSuccess(res, payment, 'Cash payment recorded successfully');
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
